@@ -1,0 +1,64 @@
+---
+###############################################################################
+# Download the panel source, extract it and install PHP dependencies.
+###############################################################################
+
+- name: Ensure the panel install directory exists
+  ansible.builtin.file:
+    path: "{{ ludus_pterodactyl_install_dir }}"
+    state: directory
+    owner: "{{ ludus_pterodactyl_web_user }}"
+    group: "{{ ludus_pterodactyl_web_group }}"
+    mode: "0755"
+
+- name: Detect whether the panel is already installed
+  ansible.builtin.stat:
+    path: "{{ ludus_pterodactyl_install_dir }}/.env"
+  register: ludus_pterodactyl_env_stat
+
+- name: Record fresh-install state
+  ansible.builtin.set_fact:
+    ludus_pterodactyl_fresh_install: "{{ not ludus_pterodactyl_env_stat.stat.exists }}"
+
+- name: Install the panel source (fresh install only)
+  when: ludus_pterodactyl_fresh_install | bool
+  block:
+    - name: Download the panel release to the VM (cached on the Ludus host)
+      ansible.builtin.include_tasks: ../download_file.yml
+      vars:
+        ludus_download_file_name: "panel.tar.gz"
+        ludus_download_file_url: "{{ ludus_pterodactyl_panel_download_url }}"
+        ludus_download_file_host_path: "{{ ludus_pterodactyl_install_dir }}"
+        # 'latest' changes over time, so force a fresh copy when tracking it.
+        ludus_download_file_force_download: "{{ ludus_pterodactyl_panel_version == 'latest' }}"
+
+    - name: Extract the panel archive
+      ansible.builtin.unarchive:
+        src: "{{ ludus_pterodactyl_install_dir }}/panel.tar.gz"
+        dest: "{{ ludus_pterodactyl_install_dir }}"
+        remote_src: true
+        creates: "{{ ludus_pterodactyl_install_dir }}/artisan"
+
+    - name: Set permissions on storage and bootstrap/cache
+      ansible.builtin.shell:
+        cmd: "chmod -R 755 storage/* bootstrap/cache/"
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      changed_when: true
+
+    - name: Create the .env file from the example
+      ansible.builtin.copy:
+        src: "{{ ludus_pterodactyl_install_dir }}/.env.example"
+        dest: "{{ ludus_pterodactyl_install_dir }}/.env"
+        remote_src: true
+        force: false
+        owner: "{{ ludus_pterodactyl_web_user }}"
+        group: "{{ ludus_pterodactyl_web_group }}"
+        mode: "0640"
+
+- name: Install PHP dependencies with Composer
+  ansible.builtin.command:
+    cmd: composer install --no-dev --optimize-autoloader --no-interaction
+    chdir: "{{ ludus_pterodactyl_install_dir }}"
+    creates: "{{ ludus_pterodactyl_install_dir }}/vendor/autoload.php"
+  environment:
+    COMPOSER_ALLOW_SUPERUSER: "1"

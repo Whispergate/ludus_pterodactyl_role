@@ -1,0 +1,29 @@
+---
+###############################################################################
+# Create the panel database and user in the local MariaDB instance.
+#
+# Uses the mysql CLI over the local unix socket (root auth) so no extra Ansible
+# collection is required. Operations are guarded to be idempotent.
+###############################################################################
+
+- name: Check whether the panel database already exists
+  ansible.builtin.command:
+    cmd: mysql -N -B -e "SHOW DATABASES LIKE '{{ ludus_pterodactyl_db_name }}'"
+  register: ludus_pterodactyl_db_exists
+  changed_when: false
+
+- name: Create panel database, user and grants
+  ansible.builtin.command:
+    cmd: >-
+      mysql -e "
+      CREATE DATABASE IF NOT EXISTS `{{ ludus_pterodactyl_db_name }}`;
+      CREATE USER IF NOT EXISTS '{{ ludus_pterodactyl_db_user }}'@'{{ ludus_pterodactyl_db_host }}'
+        IDENTIFIED BY '{{ ludus_pterodactyl_db_password }}';
+      ALTER USER '{{ ludus_pterodactyl_db_user }}'@'{{ ludus_pterodactyl_db_host }}'
+        IDENTIFIED BY '{{ ludus_pterodactyl_db_password }}';
+      GRANT ALL PRIVILEGES ON `{{ ludus_pterodactyl_db_name }}`.*
+        TO '{{ ludus_pterodactyl_db_user }}'@'{{ ludus_pterodactyl_db_host }}' WITH GRANT OPTION;
+      FLUSH PRIVILEGES;
+      "
+  when: ludus_pterodactyl_db_exists.stdout | trim | length == 0
+  no_log: true

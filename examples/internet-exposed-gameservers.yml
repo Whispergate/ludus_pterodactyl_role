@@ -1,0 +1,129 @@
+# yaml-language-server: $schema=https://docs.ludus.cloud/schemas/range-config.json
+#
+# Pterodactyl panel exposed to the internet on 80/443, with two Wings game
+# nodes (Minecraft on 25565/tcp and Terraria on 7777/tcp).
+#
+# All three VMs sit on VLAN 10, so the panel talks to Wings (8080 daemon API,
+# 2022 SFTP) without extra rules. inter_vlan_default only affects cross-VLAN
+# traffic, so same-VLAN panel <-> wings is already allowed.
+#
+# Reaching this from the internet also needs, outside this file:
+#   * a public IP for the Ludus host (defaults.proxmox_public_ip during install)
+#     and port forwarding enabled for your user at creation time, and
+#   * the host / cloud firewall to forward 80,443,25565,7777 to the range router.
+# These rules open the range router's firewall; forwarding gets packets to it.
+
+network:
+  inter_vlan_default: REJECT
+  external_default: ACCEPT   # let the VMs reach the internet to install packages
+  rules:
+    - name: Panel HTTP/HTTPS from the internet
+      vlan_src: public
+      vlan_dst: 10
+      ip_last_octet_dst: 10
+      protocol: tcp
+      ports: '80,443'
+      action: ACCEPT
+
+    - name: Minecraft from the internet
+      vlan_src: public
+      vlan_dst: 10
+      ip_last_octet_dst: 11
+      protocol: tcp
+      ports: '25565'
+      action: ACCEPT
+
+    - name: Terraria from the internet
+      vlan_src: public
+      vlan_dst: 10
+      ip_last_octet_dst: 12
+      protocol: tcp
+      ports: '7777'
+      action: ACCEPT
+
+    # Optional: expose the Wings daemon (in-browser console/stats connect from
+    # the client's browser straight to Wings) and SFTP. Uncomment if you want
+    # the web console or SFTP uploads to work from the internet.
+    # - name: Wings daemon + SFTP (Minecraft node)
+    #   vlan_src: public
+    #   vlan_dst: 10
+    #   ip_last_octet_dst: 11
+    #   protocol: tcp
+    #   ports: '8080,2022'
+    #   action: ACCEPT
+    # - name: Wings daemon + SFTP (Terraria node)
+    #   vlan_src: public
+    #   vlan_dst: 10
+    #   ip_last_octet_dst: 12
+    #   protocol: tcp
+    #   ports: '8080,2022'
+    #   action: ACCEPT
+
+ludus:
+  # --- Panel (web interface, exposed on 80/443) ---------------------------
+  - vm_name: '{{range_id}}-Pterodactyl-Panel'
+    hostname: '{{range_id}}-Pterodactyl-Panel'
+    template: ubuntu-24.04-x64-server-template
+    vlan: 10
+    ip_last_octet: 10
+    ram_gb: 16
+    ram_min_gb: 4
+    cpus: 2
+    linux: true
+    roles:
+      - ludus_pterodactyl
+    role_vars:
+      ludus_pterodactyl_install_panel: true
+      ludus_pterodactyl_install_wings: false   # panel-only; game servers run on the nodes below
+      # Public FQDN that resolves to your public IP. Required for letsencrypt.
+      ludus_pterodactyl_domain: 'panel.example.com'
+      ludus_pterodactyl_ssl_mode: 'letsencrypt'   # needs port 80 reachable from the internet at deploy time
+      ludus_pterodactyl_letsencrypt_email: 'you@example.com'
+      # If you don't have a public DNS name yet, use a self-signed cert instead:
+      #   ludus_pterodactyl_ssl_mode: 'selfsigned'
+      #   ludus_pterodactyl_domain: '<panel public IP>'
+      ludus_pterodactyl_admin_username: 'admin'
+      ludus_pterodactyl_admin_password: 'ChangeMe_Admin_1!'
+      ludus_pterodactyl_db_password: 'ChangeMe_DB_1!'
+
+  # --- Wings node: Minecraft (25565/tcp) ----------------------------------
+  - vm_name: '{{range_id}}-Wings-Minecraft'
+    hostname: '{{range_id}}-Wings-Minecraft'
+    template: ubuntu-24.04-x64-server-template
+    vlan: 10
+    ip_last_octet: 11
+    ram_gb: 8
+    ram_min_gb: 2
+    cpus: 4
+    linux: true
+    roles:
+      - ludus_pterodactyl
+    role_vars:
+      ludus_pterodactyl_install_panel: false
+      ludus_pterodactyl_install_wings: true
+      # Fill these in after you create the node in the panel, then redeploy to
+      # auto-write /etc/pterodactyl/config.yml and start Wings:
+      # ludus_pterodactyl_wings_auto_configure: true
+      # ludus_pterodactyl_wings_panel_url: 'https://panel.example.com'
+      # ludus_pterodactyl_wings_node_id: '1'
+      # ludus_pterodactyl_wings_node_token: '<auto-deploy token from the panel>'
+
+  # --- Wings node: Terraria (7777/tcp) ------------------------------------
+  - vm_name: '{{range_id}}-Wings-Terraria'
+    hostname: '{{range_id}}-Wings-Terraria'
+    template: ubuntu-24.04-x64-server-template
+    vlan: 10
+    ip_last_octet: 12
+    ram_gb: 4
+    ram_min_gb: 2
+    cpus: 2
+    linux: true
+    roles:
+      - ludus_pterodactyl
+    role_vars:
+      ludus_pterodactyl_install_panel: false
+      ludus_pterodactyl_install_wings: true
+      # ludus_pterodactyl_wings_auto_configure: true
+      # ludus_pterodactyl_wings_panel_url: 'https://panel.example.com'
+      # ludus_pterodactyl_wings_node_id: '2'
+      # ludus_pterodactyl_wings_node_token: '<auto-deploy token from the panel>'

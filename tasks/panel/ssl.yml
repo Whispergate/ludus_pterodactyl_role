@@ -1,0 +1,86 @@
+---
+###############################################################################
+# SSL certificate provisioning.
+#
+#   none        -> nothing to do (plain HTTP).
+#   selfsigned  -> generate a self-signed cert with openssl (offline friendly).
+#   letsencrypt -> obtain a trusted cert with certbot (needs public DNS + :80).
+###############################################################################
+
+# --- Self-signed -----------------------------------------------------------
+- name: Provision a self-signed certificate
+  when: ludus_pterodactyl_ssl_mode == "selfsigned"
+  block:
+    - name: Create the self-signed certificate directory
+      ansible.builtin.file:
+        path: "{{ ludus_pterodactyl_selfsigned_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Generate the self-signed certificate and key
+      ansible.builtin.command:
+        cmd: >-
+          openssl req -x509 -nodes -newkey rsa:2048
+          -keyout {{ ludus_pterodactyl_effective_key }}
+          -out {{ ludus_pterodactyl_effective_cert }}
+          -days {{ ludus_pterodactyl_selfsigned_days }}
+          -subj "/CN={{ ludus_pterodactyl_domain }}"
+          -addext "subjectAltName={{ 'IP:' if ludus_pterodactyl_domain_is_ip else 'DNS:' }}{{ ludus_pterodactyl_domain }}"
+        creates: "{{ ludus_pterodactyl_effective_cert }}"
+
+    - name: Restrict permissions on the private key
+      ansible.builtin.file:
+        path: "{{ ludus_pterodactyl_effective_key }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+# --- Let's Encrypt ---------------------------------------------------------
+- name: Provision a Let's Encrypt certificate
+  when: ludus_pterodactyl_ssl_mode == "letsencrypt"
+  block:
+    - name: Refuse Let's Encrypt for a bare IP address
+      ansible.builtin.assert:
+        that:
+          - not ludus_pterodactyl_domain_is_ip
+        fail_msg: >-
+          Let's Encrypt cannot issue certificates for an IP address. Set
+          ludus_pterodactyl_domain to a publicly-resolvable FQDN or use the
+          'selfsigned' SSL mode.
+
+    - name: Install certbot
+      ansible.builtin.apt:
+        name:
+          - certbot
+        state: present
+        update_cache: true
+
+    - name: Check whether a Let's Encrypt certificate already exists
+      ansible.builtin.stat:
+        path: "{{ ludus_pterodactyl_effective_cert }}"
+      register: ludus_pterodactyl_le_cert
+
+    - name: Stop nginx so certbot can bind port 80 (standalone challenge)
+      ansible.builtin.systemd:
+        name: nginx
+        state: stopped
+      when: not ludus_pterodactyl_le_cert.stat.exists
+      failed_when: false
+
+    - name: Obtain the certificate with certbot (standalone)
+      ansible.builtin.command:
+        cmd: >-
+          certbot certonly --standalone --non-interactive --agree-tos
+          -m {{ ludus_pterodactyl_letsencrypt_email }}
+          -d {{ ludus_pterodactyl_domain }}
+        creates: "{{ ludus_pterodactyl_effective_cert }}"
+
+    - name: Install a renewal hook that reloads nginx
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          systemctl reload nginx

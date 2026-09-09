@@ -1,0 +1,146 @@
+---
+###############################################################################
+# ludus_pterodactyl - default variables
+#
+# Every variable is prefixed with `ludus_pterodactyl_` to avoid collisions with
+# other roles. Override any of these in your Ludus range config under the VM's
+# `role_vars:` block.
+###############################################################################
+
+# ---------------------------------------------------------------------------
+# What to install
+# ---------------------------------------------------------------------------
+# Install the Pterodactyl Panel (the web management interface).
+ludus_pterodactyl_install_panel: true
+# Install the Wings daemon (the per-node agent that runs game server
+# containers via Docker). Wings can be installed alongside the panel, or on its
+# own to add extra nodes - see the "Wings / multi-node" section below.
+ludus_pterodactyl_install_wings: true
+
+# PHP version used for the panel and the php-fpm socket.
+ludus_pterodactyl_php_version: "8.3"
+
+# Timezone applied to the panel (any valid PHP/tz database name).
+ludus_pterodactyl_timezone: "UTC"
+
+# ---------------------------------------------------------------------------
+# Web interface / domain
+# ---------------------------------------------------------------------------
+# The hostname or IP the panel is served on. Defaults to the VM's primary IPv4
+# address so the panel is reachable inside the Ludus range with no DNS. Set this
+# to an FQDN (e.g. panel.range.lab) if you have name resolution.
+ludus_pterodactyl_domain: "{{ ansible_default_ipv4.address }}"
+
+# Maximum upload size accepted by nginx (server/egg imports, backups, etc).
+ludus_pterodactyl_client_max_body_size: "100m"
+
+# Path where the panel source lives.
+ludus_pterodactyl_install_dir: "/var/www/pterodactyl"
+
+# Which panel release to install. "latest" tracks the newest GitHub release;
+# pin a tag such as "v1.11.10" for a reproducible build.
+ludus_pterodactyl_panel_version: "latest"
+
+# ---------------------------------------------------------------------------
+# SSL provisioning
+# ---------------------------------------------------------------------------
+# One of:
+#   none        - serve plain HTTP on port 80 (no certificate).
+#   selfsigned  - generate a self-signed certificate with openssl (default;
+#                 works in an isolated range with no internet access).
+#   letsencrypt - obtain a trusted certificate with certbot (requires the
+#                 domain to be publicly resolvable and reachable on port 80).
+ludus_pterodactyl_ssl_mode: "selfsigned"
+
+# Email used when registering a Let's Encrypt account (letsencrypt mode only).
+ludus_pterodactyl_letsencrypt_email: "admin@{{ ludus_pterodactyl_domain }}"
+
+# Validity (days) for the generated self-signed certificate.
+ludus_pterodactyl_selfsigned_days: 3650
+
+# Override the certificate/key paths nginx points at. Leave empty ("") to let
+# the role choose sensible defaults based on the SSL mode (see vars/main.yml).
+ludus_pterodactyl_ssl_cert_path: ""
+ludus_pterodactyl_ssl_key_path: ""
+
+# ---------------------------------------------------------------------------
+# Database (MariaDB, local by default)
+# ---------------------------------------------------------------------------
+ludus_pterodactyl_db_host: "127.0.0.1"
+ludus_pterodactyl_db_port: 3306
+ludus_pterodactyl_db_name: "panel"
+ludus_pterodactyl_db_user: "pterodactyl"
+# CHANGE THIS in your range config. Used for the panel <-> database connection.
+ludus_pterodactyl_db_password: "ChangeMe_Ptero_DB_1!"
+
+# ---------------------------------------------------------------------------
+# Redis (used for cache, session and queue drivers)
+# ---------------------------------------------------------------------------
+ludus_pterodactyl_redis_host: "127.0.0.1"
+ludus_pterodactyl_redis_port: 6379
+
+# ---------------------------------------------------------------------------
+# Initial admin user (created on first install only)
+# ---------------------------------------------------------------------------
+ludus_pterodactyl_admin_email: "admin@{{ ludus_pterodactyl_domain }}"
+ludus_pterodactyl_admin_username: "admin"
+ludus_pterodactyl_admin_first_name: "Range"
+ludus_pterodactyl_admin_last_name: "Admin"
+# CHANGE THIS. Password for the first panel administrator.
+ludus_pterodactyl_admin_password: "ChangeMe_Ptero_Admin_1!"
+
+# ---------------------------------------------------------------------------
+# Outbound mail (optional). Driver "log" writes mail to the panel log and needs
+# no mail server - a sane default for a lab. Set to "smtp" and fill the rest to
+# deliver real email.
+# ---------------------------------------------------------------------------
+ludus_pterodactyl_mail_driver: "log"
+ludus_pterodactyl_mail_host: "smtp.example.com"
+ludus_pterodactyl_mail_port: 587
+ludus_pterodactyl_mail_username: ""
+ludus_pterodactyl_mail_password: ""
+ludus_pterodactyl_mail_encryption: "tls"
+ludus_pterodactyl_mail_from_address: "no-reply@{{ ludus_pterodactyl_domain }}"
+ludus_pterodactyl_mail_from_name: "Pterodactyl Panel"
+
+# ---------------------------------------------------------------------------
+# Upgrade
+# ---------------------------------------------------------------------------
+# Set to true to run the official in-place upgrade of an already-installed
+# panel to `ludus_pterodactyl_panel_version` on the next role run.
+ludus_pterodactyl_upgrade: false
+
+# ---------------------------------------------------------------------------
+# Wings / multi-node
+# ---------------------------------------------------------------------------
+# To add extra game server nodes, deploy this role on additional VMs with:
+#     ludus_pterodactyl_install_panel: false
+#     ludus_pterodactyl_install_wings: true
+# Each such VM installs Docker + Wings only (no panel/DB/nginx).
+#
+# By default Wings is installed and enabled but not started, waiting for you to
+# create a Node in the panel and drop its config at /etc/pterodactyl/config.yml.
+#
+# Set auto_configure to true to have the role register the node for you using an
+# auto-deploy token from the panel (Admin -> Nodes -> <node> -> Configuration ->
+# Generate Token). The role then runs `wings configure` to write config.yml and
+# starts Wings. This is optional and off by default.
+ludus_pterodactyl_wings_auto_configure: false
+# Base URL of the panel this node talks to, e.g. https://10.2.10.21 (or the http
+# URL if the panel is served without TLS). Defaults to this host's own panel URL
+# when the panel is co-installed, otherwise must be set for auto-configure.
+ludus_pterodactyl_wings_panel_url: "{{ ludus_pterodactyl_app_url if ludus_pterodactyl_install_panel | bool else '' }}"
+# Numeric node ID shown in the panel for this node.
+ludus_pterodactyl_wings_node_id: ""
+# Auto-deploy token generated in the panel for this node.
+ludus_pterodactyl_wings_node_token: ""
+# Skip TLS verification when fetching the config from the panel. Needed when the
+# panel uses a self-signed certificate (the default SSL mode).
+ludus_pterodactyl_wings_allow_insecure: "{{ ludus_pterodactyl_ssl_mode == 'selfsigned' }}"
+
+# ---------------------------------------------------------------------------
+# Firewall (optional)
+# ---------------------------------------------------------------------------
+# Open the panel/wings ports with ufw. Off by default because Ludus ranges are
+# typically already network-isolated.
+ludus_pterodactyl_manage_firewall: false

@@ -1,0 +1,21 @@
+---
+###############################################################################
+# Optional ufw firewall rules for the panel and Wings.
+###############################################################################
+
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Allow required ports through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "22"       # SSH
+    - "80"       # HTTP / ACME challenge
+    - "443"      # HTTPS panel
+    - "8080"     # Wings API
+    - "2022"     # Wings SFTP

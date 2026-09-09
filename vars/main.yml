@@ -1,0 +1,61 @@
+---
+###############################################################################
+# ludus_pterodactyl - computed (internal) variables
+#
+# These are derived from the user-facing defaults and should not normally be
+# overridden directly.
+###############################################################################
+
+# Web address the panel advertises to itself (APP_URL) and browsers use.
+ludus_pterodactyl_url_scheme: "{{ 'https' if ludus_pterodactyl_ssl_mode in ['selfsigned', 'letsencrypt'] else 'http' }}"
+ludus_pterodactyl_app_url: "{{ ludus_pterodactyl_url_scheme }}://{{ ludus_pterodactyl_domain }}"
+
+# php-fpm unix socket for the selected PHP version.
+ludus_pterodactyl_php_fpm_socket: "/run/php/php{{ ludus_pterodactyl_php_version }}-fpm.sock"
+ludus_pterodactyl_php_fpm_service: "php{{ ludus_pterodactyl_php_version }}-fpm"
+
+# PHP packages required by the panel, for the selected PHP version.
+ludus_pterodactyl_php_packages: "{{ ['php' + ludus_pterodactyl_php_version] + ludus_pterodactyl_php_extensions | map('regex_replace', '^(.*)$', 'php' + ludus_pterodactyl_php_version + '-\\1') | list }}"
+ludus_pterodactyl_php_extensions:
+  - common
+  - cli
+  - gd
+  - mysql
+  - mbstring
+  - bcmath
+  - xml
+  - fpm
+  - curl
+  - zip
+  - intl
+
+# Where a self-signed certificate is written.
+ludus_pterodactyl_selfsigned_dir: "/etc/pterodactyl/certs"
+
+# Effective certificate/key paths used by the nginx template. Honour an explicit
+# override, otherwise pick a location that matches the SSL mode.
+_ludus_pterodactyl_default_cert:
+  none: ""
+  selfsigned: "{{ ludus_pterodactyl_selfsigned_dir }}/fullchain.pem"
+  letsencrypt: "/etc/letsencrypt/live/{{ ludus_pterodactyl_domain }}/fullchain.pem"
+_ludus_pterodactyl_default_key:
+  none: ""
+  selfsigned: "{{ ludus_pterodactyl_selfsigned_dir }}/privkey.pem"
+  letsencrypt: "/etc/letsencrypt/live/{{ ludus_pterodactyl_domain }}/privkey.pem"
+
+ludus_pterodactyl_effective_cert: "{{ ludus_pterodactyl_ssl_cert_path if ludus_pterodactyl_ssl_cert_path | length > 0 else _ludus_pterodactyl_default_cert[ludus_pterodactyl_ssl_mode] }}"
+ludus_pterodactyl_effective_key: "{{ ludus_pterodactyl_ssl_key_path if ludus_pterodactyl_ssl_key_path | length > 0 else _ludus_pterodactyl_default_key[ludus_pterodactyl_ssl_mode] }}"
+
+# True when the target hostname is a bare IPv4 address (affects self-signed SANs
+# and Let's Encrypt eligibility).
+ludus_pterodactyl_domain_is_ip: "{{ ludus_pterodactyl_domain is match('^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$') }}"
+
+# The OS user the webserver / panel files run as (Debian family = www-data).
+ludus_pterodactyl_web_user: "www-data"
+ludus_pterodactyl_web_group: "www-data"
+
+# Panel release download URL.
+ludus_pterodactyl_panel_download_url: >-
+  {{ 'https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz'
+     if ludus_pterodactyl_panel_version == 'latest'
+     else 'https://github.com/pterodactyl/panel/releases/download/' ~ ludus_pterodactyl_panel_version ~ '/panel.tar.gz' }}

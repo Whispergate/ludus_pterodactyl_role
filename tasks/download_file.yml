@@ -1,0 +1,61 @@
+## General purpose caching downloader for Ludus
+## (Standard Ludus helper - files are cached on the Ludus host under
+##  {{ ludus_install_path }}/resources/{{ role_name }} and reused across runs.)
+
+####################################
+# You should not modify this file! #
+####################################
+
+- name: Get file if needed
+  run_once: true
+  block:
+    - name: "Create directory on Ludus host if it doesn't exist: {{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}"
+      ansible.builtin.file:
+        path: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}"
+        state: directory
+        recurse: true
+      delegate_to: localhost
+
+    - name: Check if file exists on Ludus host
+      ansible.builtin.stat:
+        path: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/{{ ludus_download_file_name }}"
+        checksum_algorithm: "{{ ludus_download_file_checksum.split(':')[0] if ludus_download_file_checksum is defined else 'sha1' }}"
+      delegate_to: localhost
+      register: file_check
+
+    - name: Check file checksum if file exists
+      ansible.builtin.set_fact:
+        existing_file_checksum_correct: "{{ file_check.stat.checksum == ludus_download_file_checksum.split(':')[1] }}"
+      when: file_check.stat.exists and ludus_download_file_checksum is defined
+
+    - name: Downloading file to Ludus host
+      ansible.builtin.get_url:
+        url: "{{ ludus_download_file_url }}"
+        dest: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/{{ ludus_download_file_name }}"
+        checksum: "{{ ludus_download_file_checksum | default(omit) }}"
+        mode: "660"
+      delegate_to: localhost
+      when: |
+        (ludus_download_file_force_download is defined and ludus_download_file_force_download)
+        or not file_check.stat.exists
+        or (existing_file_checksum_correct is defined and not existing_file_checksum_correct)
+
+- name: Create directory on VM if it doesn't exist (Linux/macOS)
+  ansible.builtin.file:
+    path: "{{ ludus_download_file_host_path }}"
+    state: directory
+    mode: "0755"
+  when: not ansible_os_family == "Windows"
+
+- name: Check if file exists on VM (Linux/macOS)
+  ansible.builtin.stat:
+    path: "{{ ludus_download_file_host_path }}/{{ ludus_download_file_name }}"
+  register: file_host_check_linux
+  when: not ansible_os_family == "Windows"
+
+- name: Copy file to VM (Linux/macOS)
+  ansible.builtin.copy:
+    src: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/{{ ludus_download_file_name }}"
+    dest: "{{ ludus_download_file_host_path }}/{{ ludus_download_file_name }}"
+    mode: "0644"
+  when: not ansible_os_family == "Windows" and not file_host_check_linux.stat.exists

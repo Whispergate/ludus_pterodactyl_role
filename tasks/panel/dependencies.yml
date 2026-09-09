@@ -1,0 +1,74 @@
+---
+###############################################################################
+# Panel dependencies: PHP, MariaDB, nginx, Redis, Composer
+###############################################################################
+
+- name: Install base prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - software-properties-common
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - curl
+      - tar
+      - unzip
+      - git
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# --- PHP repository ---------------------------------------------------------
+- name: Add ondrej/php PPA (Ubuntu)
+  ansible.builtin.apt_repository:
+    repo: "ppa:ondrej/php"
+    state: present
+    update_cache: false
+  when: ansible_distribution == "Ubuntu"
+
+- name: Add Sury PHP repository key (Debian)
+  ansible.builtin.get_url:
+    url: "https://packages.sury.org/php/apt.gpg"
+    dest: "/usr/share/keyrings/deb.sury.org-php.gpg"
+    mode: "0644"
+  when: ansible_distribution == "Debian"
+
+- name: Add Sury PHP repository (Debian)
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ {{ ansible_distribution_release }} main"
+    filename: "sury-php"
+    state: present
+    update_cache: false
+  when: ansible_distribution == "Debian"
+
+# --- Packages ---------------------------------------------------------------
+- name: Install PHP, MariaDB, nginx and Redis
+  ansible.builtin.apt:
+    name: "{{ ludus_pterodactyl_php_packages + ludus_pterodactyl_service_packages }}"
+    state: present
+    update_cache: true
+  vars:
+    ludus_pterodactyl_service_packages:
+      - mariadb-server
+      - nginx
+      - redis-server
+      - python3-pymysql
+
+- name: Install Composer v2
+  ansible.builtin.shell:
+    cmd: >-
+      curl -sS https://getcomposer.org/installer |
+      php -- --install-dir=/usr/local/bin --filename=composer
+    creates: /usr/local/bin/composer
+
+# --- Ensure core services are running --------------------------------------
+- name: Ensure MariaDB, Redis and php-fpm are enabled and started
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - mariadb
+    - redis-server
+    - "{{ ludus_pterodactyl_php_fpm_service }}"

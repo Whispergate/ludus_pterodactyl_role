@@ -1,0 +1,85 @@
+---
+###############################################################################
+# ludus_pterodactyl - entry point
+###############################################################################
+
+- name: Ensure this role is running on a supported OS
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: >-
+      ludus_pterodactyl currently supports Debian and Ubuntu only
+      (detected: {{ ansible_distribution }} {{ ansible_distribution_version }}).
+    success_msg: "Detected supported OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: Validate the selected SSL mode
+  ansible.builtin.assert:
+    that:
+      - ludus_pterodactyl_ssl_mode in ['none', 'selfsigned', 'letsencrypt']
+    fail_msg: "ludus_pterodactyl_ssl_mode must be one of: none, selfsigned, letsencrypt"
+
+# --------------------------------------------------------------------------
+# Panel
+# --------------------------------------------------------------------------
+- name: Install and configure the Pterodactyl Panel
+  when: ludus_pterodactyl_install_panel | bool
+  block:
+    - name: Include panel dependency installation
+      ansible.builtin.include_tasks: panel/dependencies.yml
+
+    - name: Include database provisioning
+      ansible.builtin.include_tasks: panel/database.yml
+
+    - name: Include SSL certificate provisioning
+      ansible.builtin.include_tasks: panel/ssl.yml
+
+    - name: Include panel installation
+      ansible.builtin.include_tasks: panel/install.yml
+
+    - name: Include panel environment configuration
+      ansible.builtin.include_tasks: panel/configure.yml
+
+    - name: Include webserver (nginx) configuration
+      ansible.builtin.include_tasks: panel/webserver.yml
+
+    - name: Include background services (queue worker + scheduler)
+      ansible.builtin.include_tasks: panel/services.yml
+
+    - name: Include in-place upgrade
+      ansible.builtin.include_tasks: panel/upgrade.yml
+      when: ludus_pterodactyl_upgrade | bool
+
+# --------------------------------------------------------------------------
+# Wings daemon
+# --------------------------------------------------------------------------
+- name: Install and configure the Wings daemon
+  ansible.builtin.include_tasks: wings/install.yml
+  when: ludus_pterodactyl_install_wings | bool
+
+# --------------------------------------------------------------------------
+# Optional firewall
+# --------------------------------------------------------------------------
+- name: Configure firewall
+  ansible.builtin.include_tasks: firewall.yml
+  when: ludus_pterodactyl_manage_firewall | bool
+
+- name: Show panel access information
+  ansible.builtin.debug:
+    msg:
+      - "Pterodactyl Panel URL : {{ ludus_pterodactyl_app_url }}"
+      - "Admin username        : {{ ludus_pterodactyl_admin_username }}"
+      - "Admin email           : {{ ludus_pterodactyl_admin_email }}"
+      - "SSL mode              : {{ ludus_pterodactyl_ssl_mode }}"
+      - "Wings installed       : {{ ludus_pterodactyl_install_wings | bool }}"
+  when: ludus_pterodactyl_install_panel | bool
+
+- name: Show Wings node information
+  ansible.builtin.debug:
+    msg:
+      - "Wings node installed (no panel on this VM)."
+      - "Talks to panel        : {{ ludus_pterodactyl_wings_panel_url | default('(set ludus_pterodactyl_wings_panel_url)') }}"
+      - "Auto-configured       : {{ ludus_pterodactyl_wings_auto_configure | bool }}"
+      - "Started               : {{ ludus_pterodactyl_wings_config.stat.exists | default(false) }}"
+  when:
+    - ludus_pterodactyl_install_wings | bool
+    - not (ludus_pterodactyl_install_panel | bool)

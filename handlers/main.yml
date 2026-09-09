@@ -1,0 +1,30 @@
+---
+- name: Reload nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded
+  listen: reload nginx
+
+- name: Restart nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+  listen: restart nginx
+
+- name: Restart php-fpm
+  ansible.builtin.systemd:
+    name: "{{ ludus_pterodactyl_php_fpm_service }}"
+    state: restarted
+  listen: restart php-fpm
+
+- name: Restart pteroq
+  ansible.builtin.systemd:
+    name: pteroq.service
+    state: restarted
+  listen: restart pteroq
+
+- name: Restart wings
+  ansible.builtin.systemd:
+    name: wings.service
+    state: restarted
+  listen: restart wings

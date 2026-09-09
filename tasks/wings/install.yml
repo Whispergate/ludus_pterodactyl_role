@@ -1,0 +1,108 @@
+---
+###############################################################################
+# Install the Wings daemon (Docker + the wings binary + systemd unit).
+#
+# Wings can be co-installed with the panel or deployed on its own to add extra
+# nodes (set ludus_pterodactyl_install_panel: false on those VMs).
+#
+# A node must exist in the panel and its config written to
+# /etc/pterodactyl/config.yml before Wings can start. That config is either:
+#   * pasted in manually from the panel's node Configuration tab, or
+#   * written automatically by this role when
+#     ludus_pterodactyl_wings_auto_configure is true (using an auto-deploy
+#     token generated in the panel).
+###############################################################################
+
+- name: Install Docker CE
+  ansible.builtin.shell:
+    cmd: "curl -fsSL https://get.docker.com/ | CHANNEL=stable bash"
+    creates: /usr/bin/docker
+  environment:
+    CHANNEL: stable
+
+- name: Ensure Docker is enabled and started
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Create the /etc/pterodactyl directory
+  ansible.builtin.file:
+    path: /etc/pterodactyl
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the Wings binary
+  ansible.builtin.get_url:
+    url: "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_{{ ludus_pterodactyl_wings_arch }}"
+    dest: /usr/local/bin/wings
+    owner: root
+    group: root
+    mode: "0755"
+  vars:
+    ludus_pterodactyl_wings_arch: "{{ 'arm64' if ansible_architecture in ['aarch64', 'arm64'] else 'amd64' }}"
+
+- name: Deploy the wings systemd unit
+  ansible.builtin.template:
+    src: wings.service.j2
+    dest: /etc/systemd/system/wings.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart wings
+
+# --- Optional: auto-register this node with the panel ----------------------
+- name: Auto-configure the Wings node against the panel
+  when: ludus_pterodactyl_wings_auto_configure | bool
+  block:
+    - name: Validate the auto-configure inputs
+      ansible.builtin.assert:
+        that:
+          - ludus_pterodactyl_wings_panel_url | length > 0
+          - ludus_pterodactyl_wings_node_id | string | length > 0
+          - ludus_pterodactyl_wings_node_token | length > 0
+        fail_msg: >-
+          ludus_pterodactyl_wings_auto_configure requires
+          ludus_pterodactyl_wings_panel_url, ludus_pterodactyl_wings_node_id and
+          ludus_pterodactyl_wings_node_token to be set.
+
+    - name: Write config.yml with 'wings configure'
+      ansible.builtin.command:
+        cmd: >-
+          /usr/local/bin/wings configure
+          --panel-url {{ ludus_pterodactyl_wings_panel_url }}
+          --token {{ ludus_pterodactyl_wings_node_token }}
+          --node {{ ludus_pterodactyl_wings_node_id }}
+          {{ '--allow-insecure' if ludus_pterodactyl_wings_allow_insecure | bool else '' }}
+        creates: /etc/pterodactyl/config.yml
+      no_log: true
+
+# --- Start / enable --------------------------------------------------------
+- name: Check for the wings configuration
+  ansible.builtin.stat:
+    path: /etc/pterodactyl/config.yml
+  register: ludus_pterodactyl_wings_config
+
+- name: Enable the wings service
+  ansible.builtin.systemd:
+    name: wings.service
+    enabled: true
+    daemon_reload: true
+
+- name: Start wings (only once a node config.yml is present)
+  ansible.builtin.systemd:
+    name: wings.service
+    state: started
+  when: ludus_pterodactyl_wings_config.stat.exists
+
+- name: Wings configuration reminder
+  ansible.builtin.debug:
+    msg: >-
+      Wings is installed and enabled but NOT started because
+      /etc/pterodactyl/config.yml is missing. Create a Node in the panel
+      (Admin -> Nodes), then either paste its Configuration into that file and
+      run 'systemctl start wings', or re-run this role with
+      ludus_pterodactyl_wings_auto_configure=true and the node id/token set.
+  when: not ludus_pterodactyl_wings_config.stat.exists

@@ -1,0 +1,38 @@
+---
+###############################################################################
+# nginx virtual host for the panel. The template chosen depends on the SSL
+# mode (plain HTTP vs. HTTP->HTTPS redirect + TLS).
+###############################################################################
+
+- name: Remove the default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: reload nginx
+
+- name: Deploy the Pterodactyl nginx virtual host
+  ansible.builtin.template:
+    src: "{{ 'nginx-http.conf.j2' if ludus_pterodactyl_ssl_mode == 'none' else 'nginx-ssl.conf.j2' }}"
+    dest: /etc/nginx/sites-available/pterodactyl.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload nginx
+
+- name: Enable the Pterodactyl nginx virtual host
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/pterodactyl.conf
+    dest: /etc/nginx/sites-enabled/pterodactyl.conf
+    state: link
+  notify: reload nginx
+
+- name: Validate the nginx configuration
+  ansible.builtin.command:
+    cmd: nginx -t
+  changed_when: false
+
+- name: Ensure nginx is enabled and started
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: started

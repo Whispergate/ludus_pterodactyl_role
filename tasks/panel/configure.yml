@@ -1,0 +1,99 @@
+---
+###############################################################################
+# Configure the panel environment: app key, environment, database, mail,
+# migrations and the initial administrator.
+###############################################################################
+
+- name: Generate the application key (first install only)
+  ansible.builtin.command:
+    cmd: php artisan key:generate --force --no-interaction
+    chdir: "{{ ludus_pterodactyl_install_dir }}"
+  when: ludus_pterodactyl_fresh_install | bool
+  changed_when: true
+  no_log: true
+
+- name: Configure the panel environment (URL, timezone, cache/queue/session, redis)
+  ansible.builtin.command:
+    cmd: >-
+      php artisan p:environment:setup
+      --author="{{ ludus_pterodactyl_admin_email }}"
+      --url="{{ ludus_pterodactyl_app_url }}"
+      --timezone="{{ ludus_pterodactyl_timezone }}"
+      --cache="redis"
+      --session="redis"
+      --queue="redis"
+      --redis-host="{{ ludus_pterodactyl_redis_host }}"
+      --redis-pass="null"
+      --redis-port="{{ ludus_pterodactyl_redis_port }}"
+      --settings-ui=true
+      --no-interaction
+    chdir: "{{ ludus_pterodactyl_install_dir }}"
+  changed_when: true
+
+- name: Configure the panel database connection
+  ansible.builtin.command:
+    cmd: >-
+      php artisan p:environment:database
+      --host="{{ ludus_pterodactyl_db_host }}"
+      --port="{{ ludus_pterodactyl_db_port }}"
+      --database="{{ ludus_pterodactyl_db_name }}"
+      --username="{{ ludus_pterodactyl_db_user }}"
+      --password="{{ ludus_pterodactyl_db_password }}"
+      --no-interaction
+    chdir: "{{ ludus_pterodactyl_install_dir }}"
+  changed_when: true
+  no_log: true
+
+- name: Apply mail settings to .env
+  ansible.builtin.lineinfile:
+    path: "{{ ludus_pterodactyl_install_dir }}/.env"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    state: present
+  loop:
+    - { key: "MAIL_MAILER", value: "{{ ludus_pterodactyl_mail_driver }}" }
+    - { key: "MAIL_HOST", value: "{{ ludus_pterodactyl_mail_host }}" }
+    - { key: "MAIL_PORT", value: "{{ ludus_pterodactyl_mail_port }}" }
+    - { key: "MAIL_USERNAME", value: "{{ ludus_pterodactyl_mail_username }}" }
+    - { key: "MAIL_PASSWORD", value: "{{ ludus_pterodactyl_mail_password }}" }
+    - { key: "MAIL_ENCRYPTION", value: "{{ ludus_pterodactyl_mail_encryption }}" }
+    - { key: "MAIL_FROM_ADDRESS", value: "{{ ludus_pterodactyl_mail_from_address }}" }
+    - { key: "MAIL_FROM_NAME", value: "{{ ludus_pterodactyl_mail_from_name }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+
+- name: Run database migrations and seeders
+  ansible.builtin.command:
+    cmd: php artisan migrate --seed --force --no-interaction
+    chdir: "{{ ludus_pterodactyl_install_dir }}"
+  register: ludus_pterodactyl_migrate
+  changed_when: "'Nothing to migrate' not in ludus_pterodactyl_migrate.stdout"
+  notify: restart pteroq
+
+- name: Create the initial administrator (first install only)
+  ansible.builtin.command:
+    cmd: >-
+      php artisan p:user:make
+      --email="{{ ludus_pterodactyl_admin_email }}"
+      --username="{{ ludus_pterodactyl_admin_username }}"
+      --name-first="{{ ludus_pterodactyl_admin_first_name }}"
+      --name-last="{{ ludus_pterodactyl_admin_last_name }}"
+      --password="{{ ludus_pterodactyl_admin_password }}"
+      --admin=1
+      --no-interaction
+    chdir: "{{ ludus_pterodactyl_install_dir }}"
+  when: ludus_pterodactyl_fresh_install | bool
+  register: ludus_pterodactyl_user_make
+  changed_when: "'created' in ludus_pterodactyl_user_make.stdout | lower or ludus_pterodactyl_user_make.rc == 0"
+  failed_when:
+    - ludus_pterodactyl_user_make.rc != 0
+    - "'already' not in ludus_pterodactyl_user_make.stderr | lower"
+  no_log: true
+
+- name: Fix ownership of the panel files
+  ansible.builtin.file:
+    path: "{{ ludus_pterodactyl_install_dir }}"
+    owner: "{{ ludus_pterodactyl_web_user }}"
+    group: "{{ ludus_pterodactyl_web_group }}"
+    recurse: true

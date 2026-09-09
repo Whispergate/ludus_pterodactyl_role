@@ -1,0 +1,6 @@
+---
+# Collections used by this role. community.general is only needed when
+# ludus_pterodactyl_manage_firewall is enabled (community.general.ufw).
+# On a Ludus host:  ludus ansible collections add community.general
+collections:
+  - name: community.general

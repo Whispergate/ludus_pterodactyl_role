@@ -1,0 +1,33 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: ludus_pterodactyl
+  author: Whispergate
+  description: >-
+    An Ansible role for Ludus that installs the Pterodactyl game server panel
+    (and optionally the Wings daemon), manages SSL provisioning (self-signed or
+    Let's Encrypt), the web server / domain, and supports in-place upgrades.
+  company: ""
+  license: BSD-2-Clause
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+        - noble
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+  galaxy_tags:
+    - pterodactyl
+    - gameserver
+    - wings
+    - panel
+    - ludus
+    - docker
+
+collections:
+  - community.general

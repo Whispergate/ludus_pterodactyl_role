@@ -1,0 +1,38 @@
+---
+###############################################################################
+# Background processing: the queue worker (pteroq.service) and the per-minute
+# scheduler cron entry.
+###############################################################################
+
+- name: Deploy the pteroq queue worker systemd unit
+  ansible.builtin.template:
+    src: pteroq.service.j2
+    dest: /etc/systemd/system/pteroq.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart pteroq
+
+- name: Ensure redis-server is enabled and started
+  ansible.builtin.systemd:
+    name: redis-server
+    enabled: true
+    state: started
+
+- name: Enable and start the pteroq queue worker
+  ansible.builtin.systemd:
+    name: pteroq.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Install the panel scheduler cron entry
+  ansible.builtin.cron:
+    name: "pterodactyl schedule:run"
+    user: "{{ ludus_pterodactyl_web_user }}"
+    job: "php {{ ludus_pterodactyl_install_dir }}/artisan schedule:run >> /dev/null 2>&1"
+    minute: "*"
+    hour: "*"
+    day: "*"
+    month: "*"
+    weekday: "*"

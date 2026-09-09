@@ -1,0 +1,80 @@
+---
+###############################################################################
+# Official in-place panel upgrade.
+# https://pterodactyl.io/panel/1.0/updating.html
+#
+# Runs only when ludus_pterodactyl_upgrade=true and a panel is already present.
+###############################################################################
+
+- name: Upgrade the Pterodactyl panel
+  when: not (ludus_pterodactyl_fresh_install | default(true) | bool)
+  block:
+    - name: Put the panel into maintenance mode
+      ansible.builtin.command:
+        cmd: php artisan down
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      changed_when: true
+
+    - name: Download the target panel release (forced fresh copy)
+      ansible.builtin.include_tasks: ../download_file.yml
+      vars:
+        ludus_download_file_name: "panel-upgrade.tar.gz"
+        ludus_download_file_url: "{{ ludus_pterodactyl_panel_download_url }}"
+        ludus_download_file_host_path: "{{ ludus_pterodactyl_install_dir }}"
+        ludus_download_file_force_download: true
+
+    - name: Extract the new release over the existing install
+      ansible.builtin.unarchive:
+        src: "{{ ludus_pterodactyl_install_dir }}/panel-upgrade.tar.gz"
+        dest: "{{ ludus_pterodactyl_install_dir }}"
+        remote_src: true
+      changed_when: true
+
+    - name: Restore permissions on storage and bootstrap/cache
+      ansible.builtin.shell:
+        cmd: "chmod -R 755 storage/* bootstrap/cache/"
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      changed_when: true
+
+    - name: Update PHP dependencies
+      ansible.builtin.command:
+        cmd: composer install --no-dev --optimize-autoloader --no-interaction
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      environment:
+        COMPOSER_ALLOW_SUPERUSER: "1"
+      changed_when: true
+
+    - name: Clear compiled views and cached config
+      ansible.builtin.command:
+        cmd: "php artisan {{ item }}"
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      loop:
+        - view:clear
+        - config:clear
+      changed_when: true
+
+    - name: Run database migrations for the new release
+      ansible.builtin.command:
+        cmd: php artisan migrate --seed --force --no-interaction
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      register: ludus_pterodactyl_upgrade_migrate
+      changed_when: "'Nothing to migrate' not in ludus_pterodactyl_upgrade_migrate.stdout"
+
+    - name: Restore ownership of the panel files
+      ansible.builtin.file:
+        path: "{{ ludus_pterodactyl_install_dir }}"
+        owner: "{{ ludus_pterodactyl_web_user }}"
+        group: "{{ ludus_pterodactyl_web_group }}"
+        recurse: true
+
+    - name: Restart the queue workers
+      ansible.builtin.command:
+        cmd: php artisan queue:restart
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      changed_when: true
+
+    - name: Bring the panel out of maintenance mode
+      ansible.builtin.command:
+        cmd: php artisan up
+        chdir: "{{ ludus_pterodactyl_install_dir }}"
+      changed_when: true
