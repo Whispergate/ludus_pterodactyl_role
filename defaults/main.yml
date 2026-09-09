@@ -29,6 +29,11 @@ ludus_pterodactyl_manage_php_repo: "{{ ludus_pterodactyl_php_version != ludus_pt
 # Timezone applied to the panel (any valid PHP/tz database name).
 ludus_pterodactyl_timezone: "UTC"
 
+# Google reCAPTCHA on the login page. Pterodactyl enables it by default, but it
+# needs the browser to reach Google - which fails in an isolated range - so it
+# is disabled here. Set true only if the panel's users have internet access.
+ludus_pterodactyl_recaptcha_enabled: false
+
 # ---------------------------------------------------------------------------
 # Web interface / domain
 # ---------------------------------------------------------------------------
@@ -94,7 +99,11 @@ ludus_pterodactyl_redis_port: 6379
 # ---------------------------------------------------------------------------
 # Initial admin user (created on first install only)
 # ---------------------------------------------------------------------------
-ludus_pterodactyl_admin_email: "admin@{{ ludus_pterodactyl_domain }}"
+# Used for the admin account and as the panel's egg "author" email, which
+# Pterodactyl validates - so it must be a real email address. When the panel
+# domain is a bare IP, fall back to a valid placeholder domain instead of
+# admin@<ip> (which fails validation). Override with your own address.
+ludus_pterodactyl_admin_email: "admin@{{ 'example.com' if ludus_pterodactyl_domain_is_ip | bool else ludus_pterodactyl_domain }}"
 ludus_pterodactyl_admin_username: "admin"
 ludus_pterodactyl_admin_first_name: "Range"
 ludus_pterodactyl_admin_last_name: "Admin"
@@ -149,6 +158,32 @@ ludus_pterodactyl_wings_node_token: ""
 # Skip TLS verification when fetching the config from the panel. Needed when the
 # panel uses a self-signed certificate (the default SSL mode).
 ludus_pterodactyl_wings_allow_insecure: "{{ ludus_pterodactyl_ssl_mode == 'selfsigned' }}"
+
+# ---------------------------------------------------------------------------
+# Automated node/server provisioning (optional)
+# ---------------------------------------------------------------------------
+# When true, the role fully wires panel <-> wings with no manual UI steps:
+#   * the panel VM mints an application API key, publishes its URL/IP/cert to
+#     the Ludus host resource dir, and ensures a Location exists;
+#   * each wings VM registers itself as a Node, writes its Wings config, trusts
+#     the panel's (self-signed) cert, creates its game-port allocation, and
+#     starts Wings.
+# Enable it on the panel AND every wings VM. On the wings VMs, add a depends_on
+# for the panel VM so the panel publishes its data first (see README).
+ludus_pterodactyl_manage_game_nodes: false
+
+# Location created/used for the game nodes.
+ludus_pterodactyl_location_short: "ludus"
+ludus_pterodactyl_location_long: "Ludus game servers"
+
+# Per-node settings (set these on each wings VM).
+ludus_pterodactyl_node_name: "{{ ansible_hostname }}"
+ludus_pterodactyl_node_memory_mb: 4096
+ludus_pterodactyl_node_disk_mb: 20000
+ludus_pterodactyl_node_daemon_port: 8080
+ludus_pterodactyl_node_sftp_port: 2022
+# Game port(s) to allocate on this node, e.g. ["25565"] for Minecraft.
+ludus_pterodactyl_node_allocation_ports: []
 
 # ---------------------------------------------------------------------------
 # Firewall (optional)

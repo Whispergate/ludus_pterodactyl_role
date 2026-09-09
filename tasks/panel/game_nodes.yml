@@ -1,0 +1,90 @@
+---
+###############################################################################
+# Panel-side game-node provisioning.
+# Mints an application API key, publishes the panel URL/IP/cert to the Ludus
+# host resource dir (so wings VMs can self-register), and ensures the Location.
+###############################################################################
+
+- name: Deploy the API-key minting helper
+  ansible.builtin.copy:
+    dest: "{{ ludus_pterodactyl_install_dir }}/.ludus_mkkey.php"
+    owner: "{{ ludus_pterodactyl_web_user }}"
+    group: "{{ ludus_pterodactyl_web_group }}"
+    # 0644 so the become chain can open it for stdin redirect (no secret in the
+    # script itself; the minted key is captured with no_log).
+    mode: "0644"
+    content: |
+      $admin = \Pterodactyl\Models\User::where("root_admin", true)->orderBy("id")->first();
+      \Pterodactyl\Models\ApiKey::where("memo","ludus-automation")->where("key_type",\Pterodactyl\Models\ApiKey::TYPE_APPLICATION)->delete();
+      $key = app(\Pterodactyl\Services\Api\KeyCreationService::class)->setKeyType(\Pterodactyl\Models\ApiKey::TYPE_APPLICATION)->handle(["user_id"=>$admin->id,"memo"=>"ludus-automation","r_locations"=>3,"r_nodes"=>3,"r_allocations"=>3,"r_servers"=>3,"r_nests"=>1,"r_eggs"=>1,"r_users"=>1]);
+      echo "APIKEY=".$key->identifier.decrypt($key->token).PHP_EOL;
+
+- name: Mint the application API key
+  # Runs as root (like the other artisan tasks) - becoming the unprivileged
+  # www-data user needs setfacl/ACLs that aren't present. HOME is set inline so
+  # psysh has a writable config dir (root's /root would also work, but /tmp
+  # keeps it self-contained).
+  ansible.builtin.shell:
+    cmd: "HOME=/tmp XDG_CONFIG_HOME=/tmp php artisan tinker < {{ ludus_pterodactyl_install_dir }}/.ludus_mkkey.php"
+    chdir: "{{ ludus_pterodactyl_install_dir }}"
+  register: ludus_pterodactyl_mkkey
+  changed_when: true
+  no_log: true
+
+- name: Extract the API key
+  ansible.builtin.set_fact:
+    ludus_pterodactyl_api_key: "{{ ludus_pterodactyl_mkkey.stdout | regex_search('APIKEY=([A-Za-z0-9_]+)', '\\1') | first }}"
+  no_log: true
+
+- name: Remove the minting helper
+  ansible.builtin.file:
+    path: "{{ ludus_pterodactyl_install_dir }}/.ludus_mkkey.php"
+    state: absent
+
+- name: Publish API key + panel info to the Ludus host resource dir
+  ansible.builtin.copy:
+    dest: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/{{ item.name }}"
+    content: "{{ item.content }}"
+    mode: "0600"
+  delegate_to: localhost
+  loop:
+    - name: api_key
+      content: "{{ ludus_pterodactyl_api_key }}"
+    - name: panel_info.json
+      content: "{{ {'url': ludus_pterodactyl_app_url, 'fqdn': ludus_pterodactyl_domain, 'ip': ansible_default_ipv4.address, 'has_cert': (ludus_pterodactyl_ssl_mode != 'none')} | to_json }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+# Publish the effective cert whenever the panel serves TLS. This covers the
+# letsencrypt-fell-back-to-self-signed case too, since effective_cert reflects
+# the fallback path by the time this runs.
+- name: Read the panel certificate
+  ansible.builtin.slurp:
+    src: "{{ ludus_pterodactyl_effective_cert }}"
+  register: ludus_pterodactyl_cert_slurp
+  when: ludus_pterodactyl_ssl_mode != "none"
+
+- name: Publish the panel certificate to the Ludus host resource dir
+  ansible.builtin.copy:
+    dest: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/panel_cert.pem"
+    content: "{{ ludus_pterodactyl_cert_slurp.content | b64decode }}"
+    mode: "0644"
+  delegate_to: localhost
+  when: ludus_pterodactyl_ssl_mode != "none"
+
+- name: Ensure the Location exists
+  ansible.builtin.uri:
+    url: "{{ ludus_pterodactyl_url_scheme }}://127.0.0.1/api/application/locations"
+    method: POST
+    headers:
+      Host: "{{ ludus_pterodactyl_domain }}"
+      Authorization: "Bearer {{ ludus_pterodactyl_api_key }}"
+      Accept: application/json
+    body_format: json
+    body:
+      short: "{{ ludus_pterodactyl_location_short }}"
+      long: "{{ ludus_pterodactyl_location_long }}"
+    validate_certs: false
+    status_code: [201, 422]   # 422 = short code already exists (idempotent)
+  no_log: true

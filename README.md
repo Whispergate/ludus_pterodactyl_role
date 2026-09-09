@@ -223,6 +223,61 @@ re-run with `wings_auto_configure`), and you have a multi-node cluster.
 > routing between them). Wings listens on `8080` (daemon API) and `2022` (SFTP);
 > the panel must be able to reach the node on those ports and vice-versa.
 
+## Fully automated nodes (no panel clicks)
+
+Set `ludus_pterodactyl_manage_game_nodes: true` on the panel **and** every Wings
+VM and the role does the whole Location → Node → Wings → allocation dance for
+you over the panel's Application API, with no manual UI steps:
+
+- the **panel** mints an application API key, publishes its URL/IP and (for a
+  TLS panel) its certificate to the Ludus host resource dir, and ensures the
+  Location exists;
+- each **Wings VM** reads that data, adds a hosts entry + trusts the panel cert
+  so it can reach an internally-served self-signed panel, registers itself as a
+  Node (named `ludus_pterodactyl_node_name`, default the VM hostname), writes
+  `/etc/pterodactyl/config.yml`, creates its `ludus_pterodactyl_node_allocation_ports`
+  allocation(s), and starts Wings.
+
+Because the Wings VMs read data the panel publishes, add a `depends_on` so the
+panel role runs first:
+
+```yaml
+ludus:
+  - vm_name: '{{ range_id }}-Pterodactyl-Panel'
+    # ... panel VM ...
+    roles: [whispergate.ludus_pterodactyl]
+    role_vars:
+      ludus_pterodactyl_install_wings: false
+      ludus_pterodactyl_ssl_mode: selfsigned      # internal panel; self-signed is fine
+      ludus_pterodactyl_manage_game_nodes: true
+      ludus_pterodactyl_location_short: gs
+
+  - vm_name: '{{ range_id }}-Wings-Minecraft'
+    # ... wings VM ...
+    roles:
+      - name: whispergate.ludus_pterodactyl
+        depends_on:
+          - vm_name: '{{ range_id }}-Pterodactyl-Panel'
+            role: whispergate.ludus_pterodactyl
+    role_vars:
+      ludus_pterodactyl_install_panel: false
+      ludus_pterodactyl_install_wings: true
+      ludus_pterodactyl_manage_game_nodes: true
+      ludus_pterodactyl_location_short: gs
+      ludus_pterodactyl_node_name: wings-minecraft
+      ludus_pterodactyl_node_memory_mb: 6000
+      ludus_pterodactyl_node_allocation_ports: ['25565']
+```
+
+Relevant variables: `ludus_pterodactyl_location_short` / `_long`,
+`ludus_pterodactyl_node_name`, `ludus_pterodactyl_node_memory_mb`,
+`ludus_pterodactyl_node_disk_mb`, `ludus_pterodactyl_node_daemon_port`,
+`ludus_pterodactyl_node_sftp_port`, and `ludus_pterodactyl_node_allocation_ports`.
+
+This still stops short of creating the game **servers** themselves (that needs an
+egg per game: Minecraft ships by default, Terraria must be imported under
+**Nests → Import Egg**); create those in the panel once the nodes are green.
+
 ## Upgrading
 
 Set `ludus_pterodactyl_upgrade: true` (optionally pin

@@ -45,6 +45,10 @@
     - name: Include background services (queue worker + scheduler)
       ansible.builtin.include_tasks: panel/services.yml
 
+    - name: Include game-node provisioning (panel side)
+      ansible.builtin.include_tasks: panel/game_nodes.yml
+      when: ludus_pterodactyl_manage_game_nodes | bool
+
     - name: Include in-place upgrade
       ansible.builtin.include_tasks: panel/upgrade.yml
       when: ludus_pterodactyl_upgrade | bool

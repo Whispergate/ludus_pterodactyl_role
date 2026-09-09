@@ -29,6 +29,23 @@
     label: "{{ item.key }}"
   no_log: true
 
+- name: Apply panel security .env settings
+  ansible.builtin.lineinfile:
+    path: "{{ ludus_pterodactyl_install_dir }}/.env"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    state: present
+  loop:
+    # reCAPTCHA needs internet in the browser; off by default for a range.
+    - key: "RECAPTCHA_ENABLED"
+      value: "{{ ludus_pterodactyl_recaptcha_enabled | bool | ternary('true', 'false') }}"
+    # Secure cookies require HTTPS; must be false when the panel serves plain HTTP
+    # or login will fail (the browser drops the session cookie).
+    - key: "SESSION_SECURE_COOKIE"
+      value: "{{ (ludus_pterodactyl_ssl_mode != 'none') | ternary('true', 'false') }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Generate the application key (first install only)
   ansible.builtin.command:
     cmd: php artisan key:generate --force --no-interaction

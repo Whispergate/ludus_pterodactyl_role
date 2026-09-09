@@ -1,0 +1,167 @@
+---
+###############################################################################
+# Wings-side node registration.
+# Reads the API key + panel info published by the panel role, registers this VM
+# as a Node, writes the Wings config, trusts the panel cert, creates the game
+# allocation(s), and starts Wings.
+###############################################################################
+
+- name: Wait for the panel to publish its API key
+  ansible.builtin.slurp:
+    src: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/api_key"
+  delegate_to: localhost
+  register: ludus_pterodactyl_apikey_slurp
+  until: ludus_pterodactyl_apikey_slurp is succeeded
+  retries: 30
+  delay: 10
+  no_log: true
+
+- name: Read the published panel info
+  ansible.builtin.slurp:
+    src: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/panel_info.json"
+  delegate_to: localhost
+  register: ludus_pterodactyl_panelinfo_slurp
+
+- name: Set panel automation facts
+  ansible.builtin.set_fact:
+    ludus_pterodactyl_api_key: "{{ ludus_pterodactyl_apikey_slurp.content | b64decode }}"
+    ludus_pterodactyl_panel: "{{ ludus_pterodactyl_panelinfo_slurp.content | b64decode | from_json }}"
+  no_log: true
+
+- name: Resolve the panel FQDN to its internal IP (hosts entry)
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: " {{ ludus_pterodactyl_panel.fqdn }}$"
+    line: "{{ ludus_pterodactyl_panel.ip }} {{ ludus_pterodactyl_panel.fqdn }}"
+    state: present
+  when: ludus_pterodactyl_panel.fqdn != ludus_pterodactyl_panel.ip
+
+- name: Trust the panel certificate (any TLS panel; needed for self-signed)
+  when: ludus_pterodactyl_panel.has_cert | bool
+  block:
+    - name: Fetch the published panel certificate
+      ansible.builtin.slurp:
+        src: "{{ ludus_install_path | default('/opt/ludus') }}/resources/{{ role_name }}/panel_cert.pem"
+      delegate_to: localhost
+      register: ludus_pterodactyl_panelcert
+
+    - name: Install the panel certificate into the trust store
+      ansible.builtin.copy:
+        dest: /usr/local/share/ca-certificates/pterodactyl-panel.crt
+        content: "{{ ludus_pterodactyl_panelcert.content | b64decode }}"
+        mode: "0644"
+      register: ludus_pterodactyl_ca
+
+    - name: Update the CA trust store
+      ansible.builtin.command: update-ca-certificates
+      when: ludus_pterodactyl_ca.changed
+      changed_when: true
+
+- name: Look up the Location id
+  ansible.builtin.uri:
+    url: "{{ ludus_pterodactyl_panel.url }}/api/application/locations"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ ludus_pterodactyl_api_key }}"
+      Accept: application/json
+    validate_certs: true
+  register: ludus_pterodactyl_locs
+  no_log: true
+
+- name: Set the Location id
+  ansible.builtin.set_fact:
+    ludus_pterodactyl_location_id: "{{ (ludus_pterodactyl_locs.json.data | selectattr('attributes.short', 'equalto', ludus_pterodactyl_location_short) | map(attribute='attributes.id') | first) | default(ludus_pterodactyl_locs.json.data[0].attributes.id) }}"
+
+- name: Find an existing node for this VM
+  ansible.builtin.uri:
+    url: "{{ ludus_pterodactyl_panel.url }}/api/application/nodes"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ ludus_pterodactyl_api_key }}"
+      Accept: application/json
+    validate_certs: true
+  register: ludus_pterodactyl_nodes
+  no_log: true
+
+- name: Set node id if it already exists
+  ansible.builtin.set_fact:
+    ludus_pterodactyl_node_id: "{{ ludus_pterodactyl_nodes.json.data | selectattr('attributes.name', 'equalto', ludus_pterodactyl_node_name) | map(attribute='attributes.id') | first | default('') }}"
+
+- name: Create the node for this VM
+  ansible.builtin.uri:
+    url: "{{ ludus_pterodactyl_panel.url }}/api/application/nodes"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ ludus_pterodactyl_api_key }}"
+      Accept: application/json
+    body_format: json
+    body:
+      name: "{{ ludus_pterodactyl_node_name }}"
+      location_id: "{{ ludus_pterodactyl_location_id | int }}"
+      fqdn: "{{ ansible_default_ipv4.address }}"
+      scheme: "http"
+      memory: "{{ ludus_pterodactyl_node_memory_mb | int }}"
+      memory_overallocate: 0
+      disk: "{{ ludus_pterodactyl_node_disk_mb | int }}"
+      disk_overallocate: 0
+      upload_size: 100
+      daemon_sftp: "{{ ludus_pterodactyl_node_sftp_port | int }}"
+      daemon_listen: "{{ ludus_pterodactyl_node_daemon_port | int }}"
+    validate_certs: true
+    status_code: [201]
+  register: ludus_pterodactyl_newnode
+  when: ludus_pterodactyl_node_id | length == 0
+  no_log: true
+
+- name: Record the node id after creation
+  ansible.builtin.set_fact:
+    ludus_pterodactyl_node_id: "{{ ludus_pterodactyl_newnode.json.attributes.id }}"
+  when: ludus_pterodactyl_node_id | length == 0
+
+- name: Fetch the node configuration
+  ansible.builtin.uri:
+    url: "{{ ludus_pterodactyl_panel.url }}/api/application/nodes/{{ ludus_pterodactyl_node_id }}/configuration"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ ludus_pterodactyl_api_key }}"
+      Accept: application/json
+    validate_certs: true
+  register: ludus_pterodactyl_nodecfg
+  no_log: true
+
+- name: Ensure /etc/pterodactyl exists
+  ansible.builtin.file:
+    path: /etc/pterodactyl
+    state: directory
+    mode: "0755"
+
+- name: Write the Wings config.yml (JSON -> YAML)
+  ansible.builtin.copy:
+    dest: /etc/pterodactyl/config.yml
+    content: "{{ ludus_pterodactyl_nodecfg.json | to_nice_yaml(indent=2) }}"
+    mode: "0600"
+  notify: restart wings
+  no_log: true
+
+- name: Create game-port allocation(s)
+  ansible.builtin.uri:
+    url: "{{ ludus_pterodactyl_panel.url }}/api/application/nodes/{{ ludus_pterodactyl_node_id }}/allocations"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ ludus_pterodactyl_api_key }}"
+      Accept: application/json
+    body_format: json
+    body:
+      ip: "{{ ansible_default_ipv4.address }}"
+      ports: ["{{ item | string }}"]
+    validate_certs: true
+    status_code: [204, 422]   # 422 if the allocation already exists
+  loop: "{{ ludus_pterodactyl_node_allocation_ports }}"
+  no_log: true
+
+- name: Enable and (re)start Wings now that it is configured
+  ansible.builtin.systemd:
+    name: wings.service
+    enabled: true
+    state: restarted
+    daemon_reload: true

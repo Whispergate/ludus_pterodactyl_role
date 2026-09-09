@@ -53,9 +53,16 @@
     mode: "0644"
   notify: restart wings
 
-# --- Optional: auto-register this node with the panel ----------------------
+# --- Fully automated node registration (panel API driven) ------------------
+- name: Register this node and configure Wings via the panel API
+  ansible.builtin.include_tasks: register_node.yml
+  when: ludus_pterodactyl_manage_game_nodes | bool
+
+# --- Optional: auto-register this node with a deploy token -----------------
 - name: Auto-configure the Wings node against the panel
-  when: ludus_pterodactyl_wings_auto_configure | bool
+  when:
+    - not (ludus_pterodactyl_manage_game_nodes | bool)
+    - ludus_pterodactyl_wings_auto_configure | bool
   block:
     - name: Validate the auto-configure inputs
       ansible.builtin.assert:
@@ -79,30 +86,33 @@
         creates: /etc/pterodactyl/config.yml
       no_log: true
 
-# --- Start / enable --------------------------------------------------------
-- name: Check for the wings configuration
-  ansible.builtin.stat:
-    path: /etc/pterodactyl/config.yml
-  register: ludus_pterodactyl_wings_config
+# --- Start / enable (manual/token paths; skipped when fully automated) ------
+- name: Wings start/enable handling
+  when: not (ludus_pterodactyl_manage_game_nodes | bool)
+  block:
+    - name: Check for the wings configuration
+      ansible.builtin.stat:
+        path: /etc/pterodactyl/config.yml
+      register: ludus_pterodactyl_wings_config
 
-- name: Enable the wings service
-  ansible.builtin.systemd:
-    name: wings.service
-    enabled: true
-    daemon_reload: true
+    - name: Enable the wings service
+      ansible.builtin.systemd:
+        name: wings.service
+        enabled: true
+        daemon_reload: true
 
-- name: Start wings (only once a node config.yml is present)
-  ansible.builtin.systemd:
-    name: wings.service
-    state: started
-  when: ludus_pterodactyl_wings_config.stat.exists
+    - name: Start wings (only once a node config.yml is present)
+      ansible.builtin.systemd:
+        name: wings.service
+        state: started
+      when: ludus_pterodactyl_wings_config.stat.exists
 
-- name: Wings configuration reminder
-  ansible.builtin.debug:
-    msg: >-
-      Wings is installed and enabled but NOT started because
-      /etc/pterodactyl/config.yml is missing. Create a Node in the panel
-      (Admin -> Nodes), then either paste its Configuration into that file and
-      run 'systemctl start wings', or re-run this role with
-      ludus_pterodactyl_wings_auto_configure=true and the node id/token set.
-  when: not ludus_pterodactyl_wings_config.stat.exists
+    - name: Wings configuration reminder
+      ansible.builtin.debug:
+        msg: >-
+          Wings is installed and enabled but NOT started because
+          /etc/pterodactyl/config.yml is missing. Create a Node in the panel
+          (Admin -> Nodes), then either paste its Configuration into that file and
+          run 'systemctl start wings', or re-run with
+          ludus_pterodactyl_manage_game_nodes=true for full automation.
+      when: not ludus_pterodactyl_wings_config.stat.exists
