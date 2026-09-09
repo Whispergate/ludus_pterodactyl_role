@@ -4,6 +4,31 @@
 # migrations and the initial administrator.
 ###############################################################################
 
+# Apply mail settings FIRST, before any artisan command runs. Every artisan
+# command boots Laravel and parses .env, so a malformed value (e.g. an unquoted
+# MAIL_FROM_NAME containing a space) would break them all. Writing these quoted
+# up front also repairs a .env left broken by an earlier run.
+- name: Apply mail settings to .env
+  ansible.builtin.lineinfile:
+    path: "{{ ludus_pterodactyl_install_dir }}/.env"
+    regexp: "^{{ item.key }}="
+    # Values are double-quoted so entries containing spaces (e.g. the default
+    # MAIL_FROM_NAME "Pterodactyl Panel") are valid dotenv.
+    line: '{{ item.key }}="{{ item.value }}"'
+    state: present
+  loop:
+    - { key: "MAIL_MAILER", value: "{{ ludus_pterodactyl_mail_driver }}" }
+    - { key: "MAIL_HOST", value: "{{ ludus_pterodactyl_mail_host }}" }
+    - { key: "MAIL_PORT", value: "{{ ludus_pterodactyl_mail_port }}" }
+    - { key: "MAIL_USERNAME", value: "{{ ludus_pterodactyl_mail_username }}" }
+    - { key: "MAIL_PASSWORD", value: "{{ ludus_pterodactyl_mail_password }}" }
+    - { key: "MAIL_ENCRYPTION", value: "{{ ludus_pterodactyl_mail_encryption }}" }
+    - { key: "MAIL_FROM_ADDRESS", value: "{{ ludus_pterodactyl_mail_from_address }}" }
+    - { key: "MAIL_FROM_NAME", value: "{{ ludus_pterodactyl_mail_from_name }}" }
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+
 - name: Generate the application key (first install only)
   ansible.builtin.command:
     cmd: php artisan key:generate --force --no-interaction
@@ -44,25 +69,6 @@
   changed_when: true
   no_log: true
 
-- name: Apply mail settings to .env
-  ansible.builtin.lineinfile:
-    path: "{{ ludus_pterodactyl_install_dir }}/.env"
-    regexp: "^{{ item.key }}="
-    line: "{{ item.key }}={{ item.value }}"
-    state: present
-  loop:
-    - { key: "MAIL_MAILER", value: "{{ ludus_pterodactyl_mail_driver }}" }
-    - { key: "MAIL_HOST", value: "{{ ludus_pterodactyl_mail_host }}" }
-    - { key: "MAIL_PORT", value: "{{ ludus_pterodactyl_mail_port }}" }
-    - { key: "MAIL_USERNAME", value: "{{ ludus_pterodactyl_mail_username }}" }
-    - { key: "MAIL_PASSWORD", value: "{{ ludus_pterodactyl_mail_password }}" }
-    - { key: "MAIL_ENCRYPTION", value: "{{ ludus_pterodactyl_mail_encryption }}" }
-    - { key: "MAIL_FROM_ADDRESS", value: "{{ ludus_pterodactyl_mail_from_address }}" }
-    - { key: "MAIL_FROM_NAME", value: "{{ ludus_pterodactyl_mail_from_name }}" }
-  loop_control:
-    label: "{{ item.key }}"
-  no_log: true
-
 - name: Run database migrations and seeders
   ansible.builtin.command:
     cmd: php artisan migrate --seed --force --no-interaction
@@ -71,7 +77,16 @@
   changed_when: "'Nothing to migrate' not in ludus_pterodactyl_migrate.stdout"
   notify: restart pteroq
 
-- name: Create the initial administrator (first install only)
+# Create the admin whenever no users exist yet, rather than only on a fresh
+# install. This recovers correctly if an earlier run failed after migrating but
+# before creating the user (the users table would be empty).
+- name: Count existing panel users
+  ansible.builtin.command:
+    cmd: mysql {{ ludus_pterodactyl_db_name }} -N -B -e "SELECT COUNT(*) FROM users;"
+  register: ludus_pterodactyl_user_count
+  changed_when: false
+
+- name: Create the initial administrator
   ansible.builtin.command:
     cmd: >-
       php artisan p:user:make
@@ -83,12 +98,8 @@
       --admin=1
       --no-interaction
     chdir: "{{ ludus_pterodactyl_install_dir }}"
-  when: ludus_pterodactyl_fresh_install | bool
-  register: ludus_pterodactyl_user_make
-  changed_when: "'created' in ludus_pterodactyl_user_make.stdout | lower or ludus_pterodactyl_user_make.rc == 0"
-  failed_when:
-    - ludus_pterodactyl_user_make.rc != 0
-    - "'already' not in ludus_pterodactyl_user_make.stderr | lower"
+  when: ludus_pterodactyl_user_count.stdout | trim | int == 0
+  changed_when: true
   no_log: true
 
 - name: Fix ownership of the panel files
