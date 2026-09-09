@@ -10,8 +10,7 @@ server {
 }
 
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;
     server_name {{ ludus_pterodactyl_domain }};
 
     root {{ ludus_pterodactyl_install_dir }}/public;
