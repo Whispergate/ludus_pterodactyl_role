@@ -112,7 +112,12 @@ and log in with the admin credentials you set.
   suits an isolated range. Browsers will warn about the untrusted cert.
 - **letsencrypt**: installs certbot and issues a cert via the standalone
   challenge. Requires the domain to be a public FQDN that resolves to the VM and
-  is reachable on port 80. A renewal hook reloads nginx automatically.
+  **inbound port 80 reachable from the internet** (in a range, the Ludus host
+  must forward public :80 to the VM, not just the router firewall rule). A
+  renewal hook reloads nginx automatically. If issuance fails, the role falls
+  back to a self-signed cert so the panel still starts
+  (`ludus_pterodactyl_letsencrypt_fallback_selfsigned`, default true); fix
+  inbound :80 and re-run to get the trusted cert.
 - **none**: serves plain HTTP on port 80 (no certificate).
 
 ## Wings / running game servers

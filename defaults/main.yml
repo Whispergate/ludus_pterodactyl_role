@@ -61,6 +61,12 @@ ludus_pterodactyl_ssl_mode: "selfsigned"
 # Email used when registering a Let's Encrypt account (letsencrypt mode only).
 ludus_pterodactyl_letsencrypt_email: "admin@{{ ludus_pterodactyl_domain }}"
 
+# If a Let's Encrypt issuance fails (e.g. inbound port 80 isn't reachable from
+# the internet yet), generate a self-signed certificate instead of aborting the
+# deploy, so the panel still comes up over HTTPS. Re-run once inbound :80 works
+# to obtain the trusted certificate. Set false to hard-fail instead.
+ludus_pterodactyl_letsencrypt_fallback_selfsigned: true
+
 # Validity (days) for the generated self-signed certificate.
 ludus_pterodactyl_selfsigned_days: 3650
 

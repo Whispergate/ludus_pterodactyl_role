@@ -4,38 +4,16 @@
 #
 #   none        -> nothing to do (plain HTTP).
 #   selfsigned  -> generate a self-signed cert with openssl (offline friendly).
-#   letsencrypt -> obtain a trusted cert with certbot (needs public DNS + :80).
+#   letsencrypt -> obtain a trusted cert with certbot. Needs the domain to
+#                  resolve to this VM and inbound port 80 reachable from the
+#                  internet. If issuance fails and fallback is enabled, a
+#                  self-signed cert is generated so the panel still comes up.
 ###############################################################################
 
 # --- Self-signed -----------------------------------------------------------
 - name: Provision a self-signed certificate
+  ansible.builtin.include_tasks: ssl_selfsigned.yml
   when: ludus_pterodactyl_ssl_mode == "selfsigned"
-  block:
-    - name: Create the self-signed certificate directory
-      ansible.builtin.file:
-        path: "{{ ludus_pterodactyl_selfsigned_dir }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Generate the self-signed certificate and key
-      ansible.builtin.command:
-        cmd: >-
-          openssl req -x509 -nodes -newkey rsa:2048
-          -keyout {{ ludus_pterodactyl_effective_key }}
-          -out {{ ludus_pterodactyl_effective_cert }}
-          -days {{ ludus_pterodactyl_selfsigned_days }}
-          -subj "/CN={{ ludus_pterodactyl_domain }}"
-          -addext "subjectAltName={{ 'IP:' if ludus_pterodactyl_domain_is_ip else 'DNS:' }}{{ ludus_pterodactyl_domain }}"
-        creates: "{{ ludus_pterodactyl_effective_cert }}"
-
-    - name: Restrict permissions on the private key
-      ansible.builtin.file:
-        path: "{{ ludus_pterodactyl_effective_key }}"
-        owner: root
-        group: root
-        mode: "0600"
 
 # --- Let's Encrypt ---------------------------------------------------------
 - name: Provision a Let's Encrypt certificate
@@ -76,6 +54,14 @@
           -m {{ ludus_pterodactyl_letsencrypt_email }}
           -d {{ ludus_pterodactyl_domain }}
         creates: "{{ ludus_pterodactyl_effective_cert }}"
+      register: ludus_pterodactyl_certbot
+      # Don't abort the whole deploy on a failed challenge; handle it below.
+      failed_when: false
+
+    - name: Confirm whether the certificate was issued
+      ansible.builtin.stat:
+        path: "{{ ludus_pterodactyl_effective_cert }}"
+      register: ludus_pterodactyl_le_cert_after
 
     - name: Install a renewal hook that reloads nginx
       ansible.builtin.copy:
@@ -84,3 +70,38 @@
         content: |
           #!/bin/sh
           systemctl reload nginx
+      when: ludus_pterodactyl_le_cert_after.stat.exists
+
+    # --- Issuance failed ---------------------------------------------------
+    - name: Fail when Let's Encrypt issuance failed and fallback is disabled
+      ansible.builtin.fail:
+        msg: >-
+          Let's Encrypt could not issue a certificate for
+          {{ ludus_pterodactyl_domain }}. The ACME server must be able to reach
+          this VM on port 80 from the internet (check that the domain resolves
+          to this host and that inbound :80 is forwarded to it). Set
+          ludus_pterodactyl_ssl_mode=selfsigned, fix inbound :80, or leave
+          ludus_pterodactyl_letsencrypt_fallback_selfsigned enabled.
+      when:
+        - not ludus_pterodactyl_le_cert_after.stat.exists
+        - not (ludus_pterodactyl_letsencrypt_fallback_selfsigned | bool)
+
+    - name: Fall back to a self-signed certificate
+      when:
+        - not ludus_pterodactyl_le_cert_after.stat.exists
+        - ludus_pterodactyl_letsencrypt_fallback_selfsigned | bool
+      block:
+        - name: Warn that Let's Encrypt failed and self-signed is being used
+          ansible.builtin.debug:
+            msg: >-
+              Let's Encrypt issuance for {{ ludus_pterodactyl_domain }} failed;
+              falling back to a self-signed certificate so the panel can start.
+              Fix inbound :80 and re-run to obtain a trusted certificate.
+
+        - name: Point the webserver at the self-signed cert location
+          ansible.builtin.set_fact:
+            ludus_pterodactyl_effective_cert: "{{ ludus_pterodactyl_selfsigned_dir }}/fullchain.pem"
+            ludus_pterodactyl_effective_key: "{{ ludus_pterodactyl_selfsigned_dir }}/privkey.pem"
+
+        - name: Generate the self-signed fallback certificate
+          ansible.builtin.include_tasks: ssl_selfsigned.yml

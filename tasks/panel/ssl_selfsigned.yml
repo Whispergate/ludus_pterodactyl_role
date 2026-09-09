@@ -1,0 +1,32 @@
+---
+###############################################################################
+# Generate a self-signed certificate at the effective cert/key paths.
+# Used directly by ssl_mode=selfsigned, and as the fallback when a Let's Encrypt
+# issuance fails. Idempotent via the openssl `creates` guard.
+###############################################################################
+
+- name: Create the self-signed certificate directory
+  ansible.builtin.file:
+    path: "{{ ludus_pterodactyl_selfsigned_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Generate the self-signed certificate and key
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -nodes -newkey rsa:2048
+      -keyout {{ ludus_pterodactyl_effective_key }}
+      -out {{ ludus_pterodactyl_effective_cert }}
+      -days {{ ludus_pterodactyl_selfsigned_days }}
+      -subj "/CN={{ ludus_pterodactyl_domain }}"
+      -addext "subjectAltName={{ 'IP:' if ludus_pterodactyl_domain_is_ip else 'DNS:' }}{{ ludus_pterodactyl_domain }}"
+    creates: "{{ ludus_pterodactyl_effective_cert }}"
+
+- name: Restrict permissions on the private key
+  ansible.builtin.file:
+    path: "{{ ludus_pterodactyl_effective_key }}"
+    owner: root
+    group: root
+    mode: "0600"
