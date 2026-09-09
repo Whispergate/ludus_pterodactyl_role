@@ -20,6 +20,12 @@ ludus_pterodactyl_install_wings: true
 # PHP version used for the panel and the php-fpm socket.
 ludus_pterodactyl_php_version: "8.3"
 
+# Add the third-party PHP repository (ondrej/php on Ubuntu, Sury on Debian).
+# Defaults to true only when the distro does NOT already ship the requested PHP
+# version, so e.g. Ubuntu 24.04 + PHP 8.3 uses the built-in packages and never
+# touches Launchpad. Force it off with `false` to use distro packages only.
+ludus_pterodactyl_manage_php_repo: "{{ ludus_pterodactyl_php_version != ludus_pterodactyl_native_php }}"
+
 # Timezone applied to the panel (any valid PHP/tz database name).
 ludus_pterodactyl_timezone: "UTC"
 

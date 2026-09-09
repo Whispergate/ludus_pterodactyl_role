@@ -14,6 +14,16 @@ ludus_pterodactyl_app_url: "{{ ludus_pterodactyl_url_scheme }}://{{ ludus_pterod
 ludus_pterodactyl_php_fpm_socket: "/run/php/php{{ ludus_pterodactyl_php_version }}-fpm.sock"
 ludus_pterodactyl_php_fpm_service: "php{{ ludus_pterodactyl_php_version }}-fpm"
 
+# The PHP version each supported distro release ships in its own repos. Used to
+# decide whether the third-party PHP repo (ondrej/Sury) is needed at all.
+_ludus_pterodactyl_native_php_by_release:
+  noble: "8.3"      # Ubuntu 24.04
+  jammy: "8.1"      # Ubuntu 22.04
+  focal: "7.4"      # Ubuntu 20.04
+  bookworm: "8.2"   # Debian 12
+  bullseye: "7.4"   # Debian 11
+ludus_pterodactyl_native_php: "{{ _ludus_pterodactyl_native_php_by_release[ansible_distribution_release] | default('') }}"
+
 # PHP packages required by the panel, for the selected PHP version.
 ludus_pterodactyl_php_packages: "{{ ['php' + ludus_pterodactyl_php_version] + ludus_pterodactyl_php_extensions | map('regex_replace', '^(.*)$', 'php' + ludus_pterodactyl_php_version + '-\\1') | list }}"
 ludus_pterodactyl_php_extensions:
